@@ -1,4 +1,10 @@
-pacman::p_load(ggplot2, dplyr, googledrive, googlesheets4)
+#' ---
+#' title: "Training log"
+#' author: Kyle Humphrey
+#' date: "Last updated `r gsub(' 0', ' ', format(Sys.Date(), '%B %d %Y'), fixed = T)`"
+#' ---
+
+pacman::p_load(ggplot2, dplyr, googledrive, googlesheets4, kableExtra)
 
 sheets_auth(email = 'khumph2@gmail.com')
 files <- drive_find(q = "name = 'training-log'")
@@ -8,102 +14,102 @@ pct_1rm <- function(reps, rpe) {
   x <- 0.725 + 0.0275 * rpe - 0.0275 * reps
   x <- replace(x, rpe == 10 & reps == 1, 1)
   x <- replace(x, rpe == 10 & reps == 2, 0.98)
-  x
+  return(x)
 }
 
-date_3_months_ago <- seq(Sys.Date(), length = 2, by = '-3 months')[2]
+plt <- function(dat, y, smooth = F) {
+  out <- ggplot(dat, aes(
+    x = date,
+    y = !!enquo(y),
+    color = lift,
+    linetype = lift,
+    group = lift,
+  )) +
+    geom_point() +
+    labs(x = 'Date',
+         color = 'Lift',
+         linetype = 'Lift') +
+    geom_line() +
+    theme_bw() +
+    theme(legend.position = "bottom")
+  
+  if (smooth == T) {
+    out <- out + geom_smooth(method = "lm")
+  } else {
+    out <- out + geom_line()
+  }
+  return(out)
+}
+
+filter_date <- seq(Sys.Date(), length = 2, by = '-1 months')[2]
+
+dat <- dat %>%
+  mutate(date = as.Date(date),
+         pct1rm = round(pct_1rm(reps, rpe), 2),
+         e1rm = round(weight / pct1rm)) %>% 
+  filter(date >= filter_date)
+
+dat_lifts <- dat %>%
+  filter(lift != 'Session') %>% 
+  group_by(date, lift)
 
 
 # 1RM ---------------------------------------------------------------------
 
-dat <- dat %>%
-  mutate(date = as.Date(date),
-         pct1rm = pct_1rm(reps, rpe),
-         e1rm = weight / pct1rm) %>% 
-  filter(date > date_3_months_ago) 
+dat_lifts %>%
+  summarise(e1rm = mean(e1rm)) %>%
+  plt(e1rm) +
+  labs(y = 'Estimated 1RM')
 
-dat %>% 
-  # filter(lift %in% c("Deadlift", "Press", "Squat", "Bench")) %>% 
-  filter(lift != 'Session') %>% 
-  group_by(date, lift) %>%
-  summarise(e1rm = max(e1rm)) %>%
-  ggplot(aes(x = date, y = e1rm,
-             color = lift, linetype = lift, group = lift)) +
-  geom_point() +
-  geom_smooth(method = 'lm', se = F) +
-  labs(
-    x = 'Date',
-    y = 'Estimated 1 Rep Max',
-    color = 'Lift',
-    linetype = 'Lift'
-  ) + theme(legend.position = "bottom")
-
-dat %>%
-  filter(lift %in% c("Deadlift", "Press", "Squat", "Bench")) %>%
+dat_lifts %>%
   group_by(lift) %>%
   filter(e1rm == max(e1rm, na.rm = T)) %>%
-  arrange(desc(e1rm)) %>%
-  select(date, lift, weight, reps, rpe, e1rm, pct1rm) %>% 
-  knitr::kable()
+  select(Date = date, Lift = lift, Weight = weight, Reps = reps,
+                RPE = rpe, e1RM = e1rm, `% of 1RM` = pct1rm) %>% 
+  knitr::kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
 
 
 # Tonnage -----------------------------------------------------------------
 
-tonnage <- dat %>%
-  filter(lift != 'Session') %>%
+tonnage <- dat_lifts %>%
   mutate(tonnage = weight * reps) %>%
-  group_by(date, lift) %>% 
   summarise(tonnage = sum(tonnage)) 
 
-ggplot(tonnage, aes(y = tonnage, x = date, color = lift)) +
-  geom_point() + 
-  geom_line() + 
-  theme(legend.position = "bottom")
+plt(tonnage, tonnage) +
+  labs(y = "Tonnage")
 
 tonnage %>%
   group_by(date) %>%
-  summarise(tonnage = sum(tonnage)) %>% 
+  summarise(tonnage = sum(tonnage)) %>%
   ggplot(aes(y = tonnage, x = date)) +
-  geom_point() + 
-  geom_line() + 
+  geom_point() +
+  geom_line() +
+  theme_bw() +
   theme(legend.position = "bottom") + 
   labs(x = 'Date', y = 'Total tonnage (lbs)')
 
 
 # Volume ------------------------------------------------------------------
 
-dat %>%
-  group_by(date, lift) %>% 
+dat_lifts %>%
   summarise(Volume = sum(reps)) %>% 
-  ggplot(aes(y = Volume, x = date, color = lift)) +
-  geom_point() + 
-  geom_line() +
-  labs(x = 'Date', y = 'Volume', color = "Lift") +
-  theme(legend.position = "bottom")
+  plt(Volume)
 
 
 # Average intensity -------------------------------------------------------
 
-dat %>%
-  filter(lift != 'Session') %>%
-  group_by(date, lift) %>%
+dat_lifts %>%
   summarise(intensity = mean(pct1rm)) %>%
-  ggplot(aes(y = intensity, x = date, color = lift)) +
-  geom_point() +
-  geom_line() +
-  labs(x = 'Date',
-       y = 'Average intensity (% of estimated 1RM)',
-       color = "Lift") +
-  theme(legend.position = "bottom")
+  plt(intensity) +
+  labs(y = 'Average intensity (% of estimated 1RM)')
 
 
 # Session RPE -------------------------------------------------------------
 
 dat %>%
-  filter(lift == 'Session') %>% 
+  filter(lift == 'Session') %>%
   group_by(date) %>% 
-  ggplot(aes(y = rpe, x = date, color = lift)) +
-  geom_point() + 
-  geom_line() +
-  labs(x = 'Date', y = 'Session RPE', color = "Lift") +
-  theme(legend.position = "bottom")
+  plt(rpe) +
+  labs(y = 'Session RPE') +
+  theme(legend.position = 'none')
