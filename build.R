@@ -7,4 +7,4 @@ knitr::opts_chunk$set(
   fig.height = 5,
   out.width = '100%'
 )
-knitr::spin('workout.R')
+rmarkdown::render('workout.R')
