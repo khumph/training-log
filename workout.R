@@ -71,6 +71,37 @@ dat_lifts %>%
   knitr::kable(caption = 'Estimated One Rep Maxes') %>%
   kable_styling(bootstrap_options = c("striped", "hover"))
 
+#+ results='asis'
+last_weeks <- seq(Sys.Date(), length = 3, by = '-1 weeks')
+
+dat_lifts %>%
+  group_by(lift) %>%
+  filter(date > tail(last_weeks, 1)) %>%
+  mutate(week = if_else(date <= last_weeks[2], 'last_wk', 'this_wk')) %>%
+  group_by(lift, week) %>%
+  summarise(avg_e1rm = mean(e1rm, na.rm = T)) %>%
+  ungroup() %>% 
+  spread(week, avg_e1rm) %>%
+  filter_if(is.numeric, ~ !is.na(.)) %>% 
+  mutate(chng = this_wk - last_wk) %>% 
+  mutate_if(is.numeric, round) %>%
+  mutate(chng = cell_spec(chng, "html", color = if_else(chng < 0, "red", "blue"))) %>%
+  select(
+    Lift = lift,
+    `Mean e1RM this week` = this_wk,
+    `Mean e1RM last week` = last_wk,
+    `Change` = chng
+  ) %>%
+  knitr::kable(
+    escape = F,
+    align = 'lccc',
+    caption = paste(
+      'Change in estimated one rep maxes, average of last seven days compared',
+      'to average of the seven days before that.'
+    )
+  ) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
 
 # Tonnage -----------------------------------------------------------------
 
