@@ -65,6 +65,7 @@ dat_lifts %>%
 dat_lifts %>%
   group_by(lift) %>%
   filter(e1rm == max(e1rm, na.rm = T)) %>%
+  slice(1) %>% 
   select(Date = date, Lift = lift, Weight = weight, Reps = reps,
                 RPE = rpe, e1RM = e1rm, `% of 1RM` = pct1rm) %>% 
   knitr::kable(caption = 'Estimated One Rep Maxes') %>%
