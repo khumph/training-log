@@ -60,13 +60,14 @@ dat_lifts %>%
   summarise(e1rm = mean(e1rm)) %>%
   plt(e1rm) +
   labs(y = 'Estimated 1RM')
-
+  
+#+ results='asis'
 dat_lifts %>%
   group_by(lift) %>%
   filter(e1rm == max(e1rm, na.rm = T)) %>%
   select(Date = date, Lift = lift, Weight = weight, Reps = reps,
                 RPE = rpe, e1RM = e1rm, `% of 1RM` = pct1rm) %>% 
-  knitr::kable() %>%
+  knitr::kable(caption = 'Estimated One Rep Maxes') %>%
   kable_styling(bootstrap_options = c("striped", "hover"))
 
 
