@@ -4,7 +4,8 @@ knitr::opts_chunk$set(
   message = F,
   fig.retina = 2,
   fig.align = 'center',
-  fig.height = 5,
+  fig.height = 10,
+  fig.asp = 0.6,
   out.width = '100%'
 )
 rmarkdown::render('workout.R')
