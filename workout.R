@@ -4,7 +4,7 @@
 #' date: "Last updated `r gsub(' 0', ' ', format(Sys.Date(), '%B %d %Y'), fixed = T)`"
 #' ---
 
-pacman::p_load(ggplot2, dplyr, googledrive, googlesheets4, kableExtra)
+pacman::p_load(ggplot2, dplyr, tidyr, googledrive, googlesheets4, kableExtra)
 
 sheets_auth(email = 'khumph2@gmail.com')
 files <- drive_find(q = "name = 'training-log'")
@@ -12,15 +12,18 @@ dat <- read_sheet(files$id[1], sheet = 1)
 
 pct_1rm <- function(reps, rpe) {
   x <- 0.725 + 0.0275 * rpe - 0.0275 * reps
-  x <- replace(x, rpe == 10 & reps == 1, 1)
-  x <- replace(x, rpe == 10 & reps == 2, 0.98)
+  if (any(rpe == 10)) {
+    x <- replace(x, rpe == 10 & reps == 1, 1)
+    x <- replace(x, rpe == 10 & reps == 2, 0.98)
+  }
   return(x)
 }
 
-plt <- function(dat, y, smooth = F) {
-  out <- ggplot(dat, aes(
+plt <- function(data, y, smooth = F) {
+  out <- filter(data, param == y) %>% 
+    ggplot(aes(
     x = date,
-    y = !!enquo(y),
+    y = value,
     color = lift,
     linetype = lift,
     group = lift,
@@ -41,7 +44,8 @@ plt <- function(dat, y, smooth = F) {
   return(out)
 }
 
-filter_date <- seq(Sys.Date(), length = 2, by = '-1 months')[2]
+# filter_date <- seq(Sys.Date(), length = 2, by = '-1 months')[2]
+filter_date <- as.Date('2019-05-28')
 
 dat <- dat %>%
   mutate(date = as.Date(date),
@@ -51,21 +55,27 @@ dat <- dat %>%
 
 dat_lifts <- dat %>%
   filter(lift != 'Session') %>% 
-  group_by(date, lift)
+  group_by(date, lift) %>%
+  mutate(tonnage = weight * reps) %>% 
+  summarise(
+    e1rm = max(e1rm),
+    tonnage = sum(tonnage),
+    volume = sum(reps),
+    intensity = mean(pct1rm)
+  ) %>% 
+  gather(param, value, -date, -lift)
 
-
-# 1RM ---------------------------------------------------------------------
+#' # Estimated one rep max
 
 dat_lifts %>%
-  summarise(e1rm = mean(e1rm)) %>%
-  plt(e1rm) +
+  plt('e1rm') +
   labs(y = 'Estimated 1RM')
   
 #+ results='asis'
-dat_lifts %>%
+dat %>%
   group_by(lift) %>%
-  filter(e1rm == max(e1rm, na.rm = T)) %>%
-  slice(1) %>% 
+  filter(e1rm == max(e1rm)) %>%
+  slice(1) %>%
   select(Date = date, Lift = lift, Weight = weight, Reps = reps,
                 RPE = rpe, e1RM = e1rm, `% of 1RM` = pct1rm) %>% 
   knitr::kable(caption = 'Estimated One Rep Maxes') %>%
@@ -74,24 +84,28 @@ dat_lifts %>%
 #+ results='asis'
 last_weeks <- seq(Sys.Date(), length = 3, by = '-1 weeks')
 
-dat_lifts %>%
+chng <- dat_lifts %>%
   group_by(lift) %>%
-  filter(date > tail(last_weeks, 1)) %>%
+  filter(date > tail(last_weeks, 1), param == 'e1rm') %>%
   mutate(week = if_else(date <= last_weeks[2], 'last_wk', 'this_wk')) %>%
   group_by(lift, week) %>%
-  summarise(avg_e1rm = mean(e1rm, na.rm = T)) %>%
-  ungroup() %>% 
-  spread(week, avg_e1rm) %>%
-  filter_if(is.numeric, ~ !is.na(.)) %>% 
-  mutate(chng = this_wk - last_wk) %>% 
-  mutate_if(is.numeric, round) %>%
-  mutate(chng = cell_spec(chng, "html", color = if_else(chng < 0, "red", "blue"))) %>%
-  select(
-    Lift = lift,
-    `Mean e1RM this week` = this_wk,
-    `Mean e1RM last week` = last_wk,
-    `Change` = chng
-  ) %>%
+  summarise(avg_e1rm = mean(value, na.rm = T)) %>%
+  ungroup() %>%
+  spread(week, avg_e1rm)
+
+if (!is.null(chng[['last_wk']])) {
+  chng <- chng %>%
+    mutate(chng = this_wk - last_wk) %>% 
+    mutate_if(is.numeric, round) %>%
+    mutate(chng = cell_spec(chng, "html", color = case_when(is.na(chng) ~ "black",
+                                                            chng <= 0 ~ "red",
+                                                            chng > 0 ~ "blue"))) %>% 
+    rename(`Mean e1RM last week` = last_wk,
+           `Change` = chng)
+}
+
+chng %>%
+  rename(Lift = lift, `Mean e1RM this week` = this_wk) %>%
   knitr::kable(
     escape = F,
     align = 'lccc',
@@ -103,46 +117,62 @@ dat_lifts %>%
   kable_styling(bootstrap_options = c("striped", "hover"))
 
 
-# Tonnage -----------------------------------------------------------------
+#' # Training variables
 
-tonnage <- dat_lifts %>%
-  mutate(tonnage = weight * reps) %>%
-  summarise(tonnage = sum(tonnage)) 
+# Average Intensity ---------------------------------------------------------
 
-plt(tonnage, tonnage) +
-  labs(y = "Tonnage")
-
-tonnage %>%
-  group_by(date) %>%
-  summarise(tonnage = sum(tonnage)) %>%
-  ggplot(aes(y = tonnage, x = date)) +
-  geom_point() +
-  geom_line() +
-  theme_bw() +
-  theme(legend.position = "bottom") + 
-  labs(x = 'Date', y = 'Total tonnage (lbs)')
+#+ fig.cap=cap
+cap <- paste('Volume over time. Volume is the total number of repetitions of',
+             'each lift (i.e., sets times reps) performed on a given day')
+dat_lifts %>% 
+  plt('volume') +
+  labs(y = 'Volume (total repetitions)')
 
 
 # Volume ------------------------------------------------------------------
 
-dat_lifts %>%
-  summarise(Volume = sum(reps)) %>% 
-  plt(Volume)
-
-
-# Average intensity -------------------------------------------------------
-
-dat_lifts %>%
-  summarise(intensity = mean(pct1rm)) %>%
-  plt(intensity) +
+#+ fig.cap=cap
+cap <- paste('Average intensity over time. Averge intensity is the average',
+             'load, as measured by percent of estimated 1RM, across all',
+             'working sets of a given lift on a given day.')
+dat_lifts %>% 
+  plt('intensity') +
   labs(y = 'Average intensity (% of estimated 1RM)')
 
 
-# Session RPE -------------------------------------------------------------
+# Tonnage -----------------------------------------------------------------
 
+#+ fig.cap=cap
+cap <- paste('Tonnage over time. Tonnage is the total weight lifted',
+             '(i.e., weight times sets times reps) for a given lift.')
+dat_lifts %>% 
+  plt('tonnage') +
+  labs(y = "Tonnage")
+
+#+ fig.cap=cap
+cap <- paste('Total tonnage over time. Total tonnage is the sum of the tonnage',
+             'of all lifts performed on a given day.')
+dat_lifts %>%
+  group_by(date) %>%
+  filter(param == 'tonnage') %>% 
+  summarise(value = sum(value),
+            param = unique(param),
+            lift = '') %>%
+  plt('tonnage') +
+  theme(legend.position = 'none') +
+  labs(x = 'Date', y = 'Total tonnage (lbs)')
+
+
+# Training load -------------------------------------------------------------
+
+#+ fig.cap=cap
+cap <- paste('Training load in aribitrary units (A.U.) over time. Arbitrary,
+             units are defined as the session RPE times the duration of the',
+             'session in minutes.')
 dat %>%
   filter(lift == 'Session') %>%
-  group_by(date) %>% 
-  plt(rpe) +
-  labs(y = 'Session RPE') +
+  mutate(value = rpe * time,
+         param = 'tl') %>% 
+  plt('tl') +
+  labs(y = 'Training load (A.U.)') +
   theme(legend.position = 'none')
