@@ -8,15 +8,12 @@ pacman::p_load(ggplot2, dplyr, tidyr, googledrive, googlesheets4, kableExtra)
 
 sheets_auth(email = 'khumph2@gmail.com')
 files <- drive_find(q = "name = 'training-log'")
-dat <- read_sheet(files$id[1], sheet = 1)
+dat_raw <- read_sheet(files$id[1], sheet = 1)
 
 pct_1rm <- function(reps, rpe) {
   x <- 0.725 + 0.0275 * rpe - 0.0275 * reps
-  if (any(rpe == 10)) {
-    x <- replace(x, rpe == 10 & reps == 1, 1)
-    x <- replace(x, rpe == 10 & reps == 2, 0.98)
-  }
-  return(x)
+  x <- replace(x, rpe == 10 & reps == 1, 1)
+  x <- replace(x, rpe == 10 & reps == 2, 0.98)
 }
 
 plt <- function(data, y, smooth = F) {
@@ -47,11 +44,16 @@ plt <- function(data, y, smooth = F) {
 # filter_date <- seq(Sys.Date(), length = 2, by = '-1 months')[2]
 filter_date <- as.Date('2019-05-28')
 
-dat <- dat %>%
+
+
+
+# Summarise previous training ---------------------------------------------
+
+dat <- dat_raw %>%
   mutate(date = as.Date(date),
          pct1rm = round(pct_1rm(reps, rpe), 2),
          e1rm = round(weight / pct1rm)) %>% 
-  filter(date >= filter_date)
+  filter(date >= filter_date, !is.na(weight) | !is.na(time) | !is.na(rpe))
 
 dat_lifts <- dat %>%
   filter(lift != 'Session') %>% 
@@ -64,6 +66,7 @@ dat_lifts <- dat %>%
     intensity = mean(pct1rm)
   ) %>% 
   gather(param, value, -date, -lift)
+
 
 #' # Estimated one rep max
 
@@ -93,19 +96,20 @@ chng <- dat_lifts %>%
   ungroup() %>%
   spread(week, avg_e1rm)
 
-if (!is.null(chng[['last_wk']])) {
-  chng <- chng %>%
-    mutate(chng = this_wk - last_wk) %>% 
-    mutate_if(is.numeric, round) %>%
-    mutate(chng = cell_spec(chng, "html", color = case_when(is.na(chng) ~ "black",
-                                                            chng <= 0 ~ "red",
-                                                            chng > 0 ~ "blue"))) %>% 
-    rename(`Mean e1RM last week` = last_wk,
-           `Change` = chng)
+if (is.null(chng[['last_wk']])) {
+  chng <- chng %>% mutate(
+    last_wk = NA_real_
+  )
 }
 
 chng %>%
-  rename(Lift = lift, `Mean e1RM this week` = this_wk) %>%
+  mutate(chng = this_wk - last_wk) %>% 
+  mutate_if(is.numeric, round) %>%
+  mutate(chng = cell_spec(chng, "html", color = case_when(is.na(chng) ~ "black",
+                                                          chng <= 0 ~ "red",
+                                                          chng > 0 ~ "blue"))) %>%
+  rename(Lift = lift, `Mean e1RM this week` = this_wk,
+         `Mean e1RM last week` = last_wk, `Change` = chng) %>%
   knitr::kable(
     escape = F,
     align = 'lccc',
@@ -116,6 +120,17 @@ chng %>%
   ) %>%
   kable_styling(bootstrap_options = c("striped", "hover"))
 
+
+# Write any calculated weights to clipboard -------------------------------
+
+if (any(!is.na(dat_raw$reps_p) &!is.na(dat_raw$rpe_p) & is.na(dat_raw$weight_p))) {
+  dat_raw %>% select(-ee1rm) %>% 
+  full_join(select(chng, lift, ee1rm = this_wk), by = 'lift') %>%
+  filter(!is.na(reps_p), !is.na(rpe_p), is.na(weight_p)) %>% 
+  mutate(weight_p = ceiling(pct_1rm(reps_p, rpe_p) * ee1rm / 5) * 5) %>%
+  select(-ee1rm, everything(), ee1rm) %>% 
+  clipr::write_clip(col.names = F)
+}
 
 #' # Training variables
 
