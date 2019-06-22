@@ -7,8 +7,8 @@ ui <- fluidPage(
     checkboxInput("overall", "Summarize over lifts")
   ),
   mainPanel(
-    plotOutput("plot1"),
-    textOutput("out")
+    textOutput("caption"),
+    plotOutput("plot1")
   )
 )
 
@@ -83,6 +83,10 @@ server <- function(input, output) {
     } else {
       out
     }
+  })
+  
+  output$caption <- renderText({
+    captions[[input$metric]]
   })
 }
 
