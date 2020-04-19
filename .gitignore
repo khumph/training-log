@@ -1,6 +1,4 @@
 .*
 !.gitignore
-*.html
-figure
-ignore
-workout.md
+rsconnect
+.Rproj.user
