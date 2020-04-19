@@ -1,3 +1,32 @@
+library(ggplot2)
+library(dplyr) 
+library(googlesheets4)
+library(shiny)
+
+last_month <- seq(Sys.Date(), length = 2, by = "-1 months") %>% tail(1)
+
+metric_labels <- c("Estimated 1RM", "Volume", "Intensity", "Tonnage", "Training Load")
+metrics <- c("e1rm", "volume", "intensity", "tonnage", "load")
+names(metrics) <- metric_labels
+
+captions <- c(
+  "Estimated 1 rep max over time.",
+  "Volume over time. Volume is the total number of repetitions (i.e., sets times reps) performed on a given day",
+  "Average intensity over time. Averge intensity is the average load, as measured by percent of estimated 1RM, across all working sets of a given lift on a given day.",
+  "Tonnage over time. Tonnage is the total weight lifted (i.e., weight times sets times reps).",
+  "Training load in aribitrary units (A.U.) over time. Arbitrary units are defined as the session RPE times the duration of the session in minutes."
+)
+names(captions) <- metrics
+
+ylabs <- c(
+  'Estimated 1RM',
+  'Volume (repetitions)',
+  'Average intensity (% of estimated 1RM)',
+  "Tonnage (lbs)",
+  "Training load (A.U.)"
+)
+names(ylabs) <- metrics
+
 ui <- fluidPage(
   headerPanel("Training log"),
   sidebarPanel(
@@ -29,6 +58,8 @@ ui <- fluidPage(
   mainPanel(
     textOutput("caption"),
     plotOutput("plot1", height = "600px")
+    # "Here's an example of what your input spreadsheet should look like:",
+    # tableOutput("example")
   )
 )
 
@@ -63,7 +94,7 @@ server <- function(input, output) {
         intensity = mean(pct1rm),
         load = unique(rpe * time)
       ) %>%
-      gather(param, value, -date, -lift) %>% 
+      tidyr::gather(param, value, -date, -lift) %>% 
       filter(!is.na(value)) %>%
       group_by(date) %>%
       filter(param == input$metric) -> 
@@ -113,18 +144,22 @@ server <- function(input, output) {
     captions[[input$metric]]
   })
   
+  output$example <- renderTable({
+    rawData() %>% select()
+  })
+  
   observeEvent(input$est, {
     dat_raw <- rawData()
     if (any(!is.na(dat_raw$reps_p) & !is.na(dat_raw$rpe_p) & is.na(dat_raw$weight_p))) {
       in_raw <- dat_raw %>%
-        select(-ee1rm) %>%
+        select(lift, reps_p, rpe_p, weight_p) %>%
         filter(!is.na(reps_p), !is.na(rpe_p), is.na(weight_p))
       in_e1rm <- selectedData() %>%
         filter(param == "e1rm", lift %in% unique(in_raw$lift)) %>%
         group_by(lift) %>%
         summarise(ee1rm = max(value))
       full_join(in_raw, in_e1rm, by = 'lift') %>% 
-        mutate(weight_p = ceiling(pct_1rm(reps_p, rpe_p) * ee1rm / 5) * 5) %>%
+        mutate(weight_p = floor(pct_1rm(reps_p, rpe_p) * ee1rm / 5) * 5) %>%
         pull(weight_p) %>%
         clipr::write_clip(col.names = F)
     } 
