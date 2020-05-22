@@ -57,9 +57,7 @@ ui <- fluidPage(
   ), 
   mainPanel(
     textOutput("caption"),
-    plotOutput("plot1", height = "600px")
-    # "Here's an example of what your input spreadsheet should look like:",
-    # tableOutput("example")
+    plotOutput("plot1")
   )
 )
 
@@ -138,7 +136,7 @@ server <- function(input, output) {
     } else {
       out
     }
-  })
+  }, height = function() length(unique(selectedData()$lift)) * 150)
   
   output$caption <- renderText({
     captions[[input$metric]]
