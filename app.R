@@ -76,10 +76,14 @@ server <- function(input, output) {
   
   selectedData <- reactive({
     rawData() %>%
+      filter(is.na(variation)) %>% 
       mutate(
         date = as.Date(date),
         pct1rm = round(pct_1rm(reps, rpe), 2),
-        e1rm = round(weight / pct1rm)
+        e1rm = round(weight / pct1rm),
+        variation = replace(variation, is.na(variation), ""),
+        lift = paste(variation, lift),
+        lift = tools::toTitleCase(lift)
       ) %>%
       filter(date >= input$date_range[1], date <= input$date_range[2],
              !is.na(weight) | !is.na(time) | !is.na(rpe)) %>%
