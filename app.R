@@ -1,9 +1,11 @@
-library(ggplot2)
 library(dplyr) 
 library(googlesheets4)
 library(shiny)
+library(plotly)
 
-last_month <- seq(Sys.Date(), length = 2, by = "-1 months") %>% tail(1)
+options(gargle_oauth_cache = ".secrets")
+
+last_month <- seq(Sys.Date(), length.out = 2, by = "-1 months") %>% tail(1)
 
 metric_labels <- c("Estimated 1RM", "Volume", "Intensity", "Tonnage", "Training Load")
 metrics <- c("e1rm", "volume", "intensity", "tonnage", "load")
@@ -27,144 +29,158 @@ ylabs <- c(
 )
 names(ylabs) <- metrics
 
+pct_1rm <- function(reps, rpe) {
+  x <- 0.725 + 0.0275 * rpe - 0.0275 * reps
+  x <- replace(x, rpe == 10 & reps == 1, 1)
+  x <- replace(x, rpe == 10 & reps == 2, 0.98)
+  return(x)
+}
+
+process_data <- function(data) {
+  data$pct1rm <- round(pct_1rm(data$reps, data$rpe), 2)
+  data$e1rm <- round(data$weight / data$pct1rm)
+  data$variation <- replace(data$variation, is.na(data$variation), "")
+  data$lift_full <- paste(data$variation, data$lift)
+  data$lift_full <- tools::toTitleCase(data$lift_full)
+  return(data)
+}
+
+get_metrics <- function(data, date_range) {
+  data <- dplyr::filter(data, date >= date_range[1], date <= date_range[2],
+                        !is.na(weight) | !is.na(time) | !is.na(rpe))
+  data <- dplyr::group_by(data, date, lift_full)
+  data$tonnage <- data$weight * data$reps
+  data <- dplyr::summarise(
+    data,
+    e1rm = max(e1rm),
+    tonnage = sum(tonnage),
+    volume = sum(reps),
+    intensity = mean(pct1rm),
+    load = unique(rpe * time)
+  ) 
+  data <- tidyr::gather(data, param, value, -date, -lift_full)
+  data <- dplyr::filter(data, !is.na(value))
+  return(data)
+}
+
 ui <- fluidPage(
   headerPanel("Training log"),
   sidebarPanel(
     textInput(
       "url",
-      "URL to google sheet with your training data. Must be shared via link:",
-      "https://docs.google.com/spreadsheets/d/1bj9p-qcq6484bHZwfPVMoG8KcqEvjzXOoOJQxtwiTEc/edit#gid=1211142681"
+      "URL to Google sheet with your training data. Must be shared publicly via link.",
+      "https://docs.google.com/spreadsheets/d/1bj9p-qcq6484bHZwfPVMoG8KcqEvjzXOoOJQxtwiTEc"
     ),
+    # textInput(
+    #   "email",
+    #   "Email the Google sheet is associated with",
+    #   "khumph2@gmail.com"
+    # ),
     dateRangeInput("date_range", "Date range", Sys.Date() - 28, Sys.Date()),
     selectInput("metric", "Metric", metrics),
-    checkboxInput("overall", "Summarize over lifts"),
-    checkboxInput("ind", "Plot lifts individually"),
-    "Calcuate and copy estimated working weights based off your best estimated 1RM over the given interval by clicking this button:",
+    # checkboxInput("overall", "Summarize over lifts"),
+    # checkboxInput("ind", "Plot lifts individually"),
+    paste("Calcuate estimated working weights based off your best estimated",
+    "1RM over the date range specified above:"),
     br(), 
-    actionButton("est", "Copy weights"),
+    actionButton("est", "Add estimated weights"),
     br(),
-    "This outputs estimated working weights for any blank",
+    "This estimates working weights for any blank",
     code("weight_p"),
     "rows you have. Requires values for",
     code("rpe_p"),
     "and",
     code("reps_p"),
-    paste0(
-      "in each row you want to estimate, and the metric in this app to be \"",
-      names(metrics[metrics == 'e1rm']),
-      "\""
-    )
+    paste("in each row you want to estimate. Currently only works for the",
+          "developer's google account due to limitations in the packages",
+          "performing Google authentication.")
   ), 
   mainPanel(
     textOutput("caption"),
-    plotOutput("plot1")
+    plotlyOutput("plot1")
   )
 )
 
-server <- function(input, output) {
+server <- function(input, output, session) {
   
   rawData <- reactive({
-    sheets_deauth()
-    read_sheet(as_sheets_id(input$url)) 
+    googlesheets4::gs4_deauth()
+    process_data(read_sheet(as_sheets_id(input$url), col_types = "Dccdidididic"))
   })
-  
-  pct_1rm <- function(reps, rpe) {
-    x <- 0.725 + 0.0275 * rpe - 0.0275 * reps
-    x <- replace(x, rpe == 10 & reps == 1, 1)
-    x <- replace(x, rpe == 10 & reps == 2, 0.98)
-  }
   
   selectedData <- reactive({
-    rawData() %>%
-      filter(is.na(variation)) %>% 
-      mutate(
-        date = as.Date(date),
-        pct1rm = round(pct_1rm(reps, rpe), 2),
-        e1rm = round(weight / pct1rm),
-        variation = replace(variation, is.na(variation), ""),
-        lift = paste(variation, lift),
-        lift = tools::toTitleCase(lift)
-      ) %>%
-      filter(date >= input$date_range[1], date <= input$date_range[2],
-             !is.na(weight) | !is.na(time) | !is.na(rpe)) %>%
-      group_by(date, lift) %>%
-      mutate(tonnage = weight * reps) %>%
-      summarise(
-        e1rm = max(e1rm),
-        tonnage = sum(tonnage),
-        volume = sum(reps),
-        intensity = mean(pct1rm),
-        load = unique(rpe * time)
-      ) %>%
-      tidyr::gather(param, value, -date, -lift) %>% 
-      filter(!is.na(value)) %>%
-      group_by(date) %>%
-      filter(param == input$metric) -> 
-      dat
+    dat <- get_metrics(rawData(), input$date_range) %>% 
+      dplyr::group_by(date) %>%
+      dplyr::filter(param == input$metric)
   
-    if (input$overall && input$metric %in% c("intensity")) {
-      summarise(dat, value = mean(value), param = unique(param), lift = "Overall")
-    } else if (input$overall && input$metric %in% c("volume", "tonnage")) {
-      summarise(dat, value = sum(value), param = unique(param), lift = "Overall")
-    } else { dat }
-    
+    # if (input$overall && input$metric %in% c("intensity")) {
+    #   dplyr::summarise(dat, value = mean(value), param = unique(param), lift_full = "Overall")
+    # } else if (input$overall && input$metric %in% c("volume", "tonnage")) {
+    #   dplyr::summarise(dat, value = sum(value), param = unique(param), lift_full = "Overall")
+    # } else { 
+      dat 
+    # }
   })
   
-  output$plot1 <- renderPlot({
-    selectedData() %>%
-      filter(param == input$metric) %>%
-      ggplot(aes(
-        x = date,
-        y = value,
-        color = lift,
-        linetype = lift,
-        group = lift,
-      )) +
-      geom_point() +
-      labs(
-        x = "Date",
-        y = ylabs[[input$metric]],
-        color = "Lift",
-        linetype = "Lift"
-      ) +
-      geom_line() +
-      theme_bw() + 
-      theme(legend.position = "bottom") ->
-      out
+  output$plot1 <- renderPlotly({
+    out <- selectedData() %>%
+      dplyr::filter(param == input$metric) %>%
+      dplyr::group_by(lift_full) %>%
+      plotly::plot_ly(x = ~date, y = ~value, color =~lift_full, type = "scatter",
+              mode = "lines+markers", height = 800) %>%
+      plotly::layout(legend = list(title = list(text="Lift"), orientation = "h"))
       
-    if (input$ind) {
-      out <- out + facet_grid(lift ~ ., scales = "free")
-    }
-    if (input$overall && input$metric != "e1rm" || input$metric == "load") {
-      out + theme(legend.position = "none")
-    } else {
+    # if (input$ind) {
+    #   out + facet_grid(lift_full ~ .)
+    # }
+    # if (input$overall && input$metric != "e1rm" || input$metric == "load") {
+    #   out %>% plotly::layout(showlegend = FALSE)
+    # } else {
       out
-    }
-  }, height = function() length(unique(selectedData()$lift)) * 150)
+    # }
+  })#, height = function() length(unique(selectedData()$lift_full)) * 150)
   
   output$caption <- renderText({
     captions[[input$metric]]
   })
   
-  output$example <- renderTable({
-    rawData() %>% select()
-  })
-  
   observeEvent(input$est, {
-    dat_raw <- rawData()
-    if (any(!is.na(dat_raw$reps_p) & !is.na(dat_raw$rpe_p) & is.na(dat_raw$weight_p))) {
-      in_raw <- dat_raw %>%
-        select(lift, reps_p, rpe_p, weight_p) %>%
-        filter(!is.na(reps_p), !is.na(rpe_p), is.na(weight_p))
-      in_e1rm <- selectedData() %>%
-        filter(param == "e1rm", lift %in% unique(in_raw$lift)) %>%
-        group_by(lift) %>%
-        summarise(ee1rm = max(value))
-      full_join(in_raw, in_e1rm, by = 'lift') %>% 
-        mutate(weight_p = floor(pct_1rm(reps_p, rpe_p) * ee1rm / 5) * 5) %>%
-        pull(weight_p) %>%
-        clipr::write_clip(col.names = F)
-    } 
+    email <- "khumph2@gmail.com"
+    googlesheets4::gs4_auth(email = email)
+    rawData <- process_data(read_sheet(as_sheets_id(input$url), col_types = "Dccdidididic"))
+    selectedData <- get_metrics(rawData, input$date_range)
+    dat <- rawData %>% filter(date >= Sys.Date())
+    in_e1rm <- selectedData %>%
+      filter(param == "e1rm", lift_full %in% unique(dat$lift_full)) %>%
+      group_by(lift_full) %>%
+      summarise(ee1rm = max(value))
+    out <- left_join(dat, in_e1rm, by = 'lift_full') %>% 
+      mutate(weight_p = if_else(is.na(weight_p),
+                                (ceiling(pct_1rm(reps_p, rpe_p) * ee1rm / 2.5) * 2.5),
+                                weight_p),
+             date = as.Date(date)) %>% 
+      select(date, lift, variation, weight, reps, rpe, time, weight_p, reps_p,
+             rpe_p, time_p, notes) %>% 
+      group_by(date) %>% 
+      do(add_row(., .before = 0)) %>% 
+      ungroup()
+    
+    dat_keep <- rawData %>% filter(date < Sys.Date())
+    empty_rows <- which(is.na(rawData$date))
+    empty_rows_in_fut <- empty_rows >= which.max(rawData$date[rawData$date < Sys.Date()])
+    empty_rows_in_past <- empty_rows[!empty_rows_in_fut]
+    rows_to_del <- (empty_rows_in_past - seq_along(empty_rows_in_past)) + 2
+    
+    start <- nrow(dat_keep) + 1
+    end <- nrow(rawData) - (length(rows_to_del))
+    bounds_to_del <- c(start, end) + 1
+    
+    ss <- as_sheets_id(input$url)
+    for (row in rows_to_del) {
+      googlesheets4::range_delete(ss, range = cell_rows(row))
+    }
+    googlesheets4::range_delete(ss, range = cell_rows(bounds_to_del))
+    googlesheets4::sheet_append(ss, out, sheet = "log")
   })
 }
 
