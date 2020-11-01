@@ -156,7 +156,7 @@ server <- function(input, output, session) {
       summarise(ee1rm = max(value))
     out <- left_join(dat, in_e1rm, by = 'lift_full') %>% 
       mutate(weight_p = if_else(is.na(weight_p),
-                                (ceiling(pct_1rm(reps_p, rpe_p) * ee1rm / 2.5) * 2.5),
+                                (round(pct_1rm(reps_p, rpe_p) * ee1rm / 2.5) * 2.5),
                                 weight_p),
              date = as.Date(date)) %>% 
       select(date, lift, variation, weight, reps, rpe, time, weight_p, reps_p,
