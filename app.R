@@ -7,8 +7,8 @@ options(gargle_oauth_cache = ".secrets")
 
 last_month <- seq(Sys.Date(), length.out = 2, by = "-1 months") %>% tail(1)
 
-metric_labels <- c("Estimated 1RM", "Volume", "Intensity", "Tonnage", "Training Load")
-metrics <- c("e1rm", "volume", "intensity", "tonnage", "load")
+metric_labels <- c("Estimated 1RM", "Volume", "Intensity", "Tonnage", "Training Load", "Duration")
+metrics <- c("e1rm", "volume", "intensity", "tonnage", "load", "dur")
 names(metrics) <- metric_labels
 
 captions <- c(
@@ -16,8 +16,9 @@ captions <- c(
   "Volume over time. Volume is the total number of repetitions (i.e., sets times reps) performed on a given day",
   "Average intensity over time. Averge intensity is the average load, as measured by percent of estimated 1RM, across all working sets of a given lift on a given day.",
   "Tonnage over time. Tonnage is the total weight lifted (i.e., weight times sets times reps).",
-  "Training load in aribitrary units (A.U.) over time. Arbitrary units are defined as the session RPE times the duration of the session in minutes."
-)
+  "Training load in aribitrary units (A.U.) over time. Arbitrary units are defined as the session RPE times the duration of the session in minutes.",
+  "Duration of training per week compared to plan."
+  )
 names(captions) <- metrics
 
 ylabs <- c(
@@ -25,7 +26,8 @@ ylabs <- c(
   'Volume (repetitions)',
   'Average intensity (% of estimated 1RM)',
   "Tonnage (lbs)",
-  "Training load (A.U.)"
+  "Training load (A.U.)",
+  "Duration (hours)"
 )
 names(ylabs) <- metrics
 
@@ -105,13 +107,33 @@ server <- function(input, output, session) {
   
   rawData <- reactive({
     googlesheets4::gs4_deauth()
-    process_data(read_sheet(as_sheets_id(input$url), col_types = "Dccdidididic"))
+    if (input$metric == "dur") {
+      sheet <-"log"
+      read_sheet(as_sheets_id(input$url), sheet = sheet)
+    } else {
+      sheet <- "lift"
+      process_data(read_sheet(as_sheets_id(input$url),
+                              sheet = sheet, col_types = "Dccdidididic"))
+    }
   })
   
   selectedData <- reactive({
-    dat <- get_metrics(rawData(), input$date_range) %>% 
-      dplyr::group_by(date) %>%
-      dplyr::filter(param == input$metric)
+    
+    if (input$metric == "dur") {
+     dat <- rawData() %>%
+       filter(!is.na(date)) %>% 
+       mutate(date = lubridate::force_tz(date, "America/Los_Angeles"),
+              iso_wk = lubridate::isoweek(date),
+              yr_wk = paste0(lubridate::year(date), "-", iso_wk)) %>% 
+       group_by(yr_wk) %>% 
+       mutate(wk_st = min(date)) %>% 
+       ungroup() %>% 
+       filter(wk_st >= input$date_range[1], wk_st <= input$date_range[2])
+    } else {
+      dat <- get_metrics(rawData(), input$date_range) %>% 
+        dplyr::group_by(date) %>%
+        dplyr::filter(param == input$metric)
+    }
   
     # if (input$overall && input$metric %in% c("intensity")) {
     #   dplyr::summarise(dat, value = mean(value), param = unique(param), lift_full = "Overall")
@@ -123,12 +145,25 @@ server <- function(input, output, session) {
   })
   
   output$plot1 <- renderPlotly({
-    out <- selectedData() %>%
-      dplyr::filter(param == input$metric) %>%
-      dplyr::group_by(lift_full) %>%
-      plotly::plot_ly(x = ~date, y = ~value, color =~lift_full, type = "scatter",
-              mode = "lines+markers", height = 800) %>%
-      plotly::layout(legend = list(title = list(text="Lift"), orientation = "h"))
+    if (input$metric == "dur") {
+      out <- selectedData() %>%
+        dplyr::group_by(wk_st) %>% 
+        dplyr::summarise(value = round(sum(dur, na.rm = T)/60, 1),
+                  value_p = round(sum(dur_p, na.rm = T)/60, 1)) %>%
+        plotly::plot_ly(x = ~wk_st, y = ~value_p, name = "Planned", type = "bar",
+                        alpha = 0.5, height = 800) %>%
+        plotly::layout(legend = list(title = list(text="Duration"),
+                                     orientation = "h"))
+        out <- out %>% plotly::add_trace(x = ~wk_st, y = ~value, name = "Actual",
+                                         alpha = 1)
+    } else {
+      out <- selectedData() %>%
+        dplyr::filter(param == input$metric) %>%
+        dplyr::group_by(lift_full) %>%
+        plotly::plot_ly(x = ~date, y = ~value, color =~lift_full, type = "scatter",
+                        mode = "lines+markers", height = 800) %>%
+        plotly::layout(legend = list(title = list(text="Lift"), orientation = "h"))
+    }
       
     # if (input$ind) {
     #   out + facet_grid(lift_full ~ .)
