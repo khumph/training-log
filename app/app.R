@@ -8,6 +8,9 @@ box::use(
   tidyr,
   tools,
 )
+box::use(
+  app/logic/transform_data
+)
 
 metric_labels <- c(
   "Estimated 1RM", "Volume", "Intensity", "Tonnage",
@@ -149,24 +152,11 @@ server <- function(input, output, session) {
   })
 
   selected_data <- shiny$reactive({
-    if (input$metric == "dur") {
-      dat <- raw_data() |>
-        dplyr$filter(!is.na(date)) |>
-        dplyr$mutate(
-          date = lubridate$force_tz(date, "America/Los_Angeles"),
-          iso_wk = lubridate$isoweek(date),
-          yr_wk = paste0(lubridate$year(date), "-", iso_wk)
-        ) |>
-        dplyr$group_by(yr_wk) |>
-        dplyr$mutate(wk_st = min(date)) |>
-        dplyr$ungroup() |>
-        dplyr$filter(wk_st >= input$date_range[1], wk_st <= input$date_range[2])
-    } else {
-      dat <- get_metrics(raw_data(), input$date_range) |>
-        dplyr$group_by(date) |>
-        dplyr$filter(param == input$metric)
-    }
-    dat
+    transform_data$select_data(
+      raw_data = raw_data(),
+      metric = input$metric,
+      date_range = input$date_range
+    )
   })
 
   output$plot1 <- plotly$renderPlotly({
