@@ -1,5 +1,6 @@
-.*
-!.gitignore
-rsconnect
 .Rproj.user
-.secrets
+.Rhistory
+.Rdata
+.httr-oauth
+.DS_Store
+.quarto
