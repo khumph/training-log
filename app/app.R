@@ -4,13 +4,19 @@ box::use(
   plotly,
   shiny,
 )
+
+# fmt: skip
 box::use(
   app/logic/transform_data,
 )
 
 metric_labels <- c(
-  "Estimated 1RM", "Volume", "Intensity", "Tonnage",
-  "Training Load", "Duration"
+  "Estimated 1RM",
+  "Volume",
+  "Intensity",
+  "Tonnage",
+  "Training Load",
+  "Duration"
 )
 metrics <- c("e1rm", "volume", "intensity", "tonnage", "load", "dur")
 names(metrics) <- metric_labels
@@ -62,7 +68,10 @@ ui <- shiny$fluidPage(
       "1bj9p-qcq6484bHZwfPVMoG8KcqEvjzXOoOJQxtwiTEc"
     ),
     shiny$dateRangeInput(
-      "date_range", "Date range", Sys.Date() - 28, Sys.Date()
+      "date_range",
+      "Date range",
+      Sys.Date() - 28,
+      Sys.Date()
     ),
     shiny$selectInput("metric", "Metric", metrics),
     paste(
@@ -115,8 +124,12 @@ server <- function(input, output, session) {
           value_p = round(sum(dur_p, na.rm = TRUE) / 60, 1)
         ) |>
         plotly$plot_ly(
-          x = ~wk_st, y = ~value_p, name = "Planned", type = "bar",
-          alpha = 0.5, height = 800
+          x = ~wk_st,
+          y = ~value_p,
+          name = "Planned",
+          type = "bar",
+          alpha = 0.5,
+          height = 800
         ) |>
         plotly$layout(
           legend = list(orientation = "h"),
@@ -129,13 +142,19 @@ server <- function(input, output, session) {
         dplyr$filter(param == input$metric) |>
         dplyr$group_by(lift_full) |>
         plotly$plot_ly(
-          x = ~date, y = ~value, color = ~lift_full, type = "scatter",
-          mode = "lines+markers", height = 800
+          x = ~date,
+          y = ~value,
+          color = ~lift_full,
+          type = "scatter",
+          mode = "lines+markers",
+          height = 800
         ) |>
-        plotly$layout(legend = list(
-          title = list(text = "Lift"),
-          orientation = "h"
-        ))
+        plotly$layout(
+          legend = list(
+            title = list(text = "Lift"),
+            orientation = "h"
+          )
+        )
     }
     out
   })

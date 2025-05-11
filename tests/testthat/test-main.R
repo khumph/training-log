@@ -2,6 +2,8 @@ box::use(
   shiny[testServer],
   testthat[expect_true, test_that],
 )
+
+# fmt: skip
 box::use(
   app/main[server],
 )

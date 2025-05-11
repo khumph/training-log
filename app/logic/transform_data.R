@@ -67,7 +67,9 @@ select_data <- function(raw_data, metric, date_range) {
 
 get_metrics <- function(data, date_range) {
   data <- dplyr$filter(
-    data, .data$date >= date_range[1], .data$date <= date_range[2],
+    data,
+    .data$date >= date_range[1],
+    .data$date <= date_range[2],
     !is.na(.data$weight) | !is.na(.data$time) | !is.na(.data$rpe)
   )
   data <- dplyr$group_by(data, date, lift_full)
@@ -79,7 +81,6 @@ get_metrics <- function(data, date_range) {
     volume = sum(.data$reps),
     intensity = mean(.data$pct1rm),
     load = unique(.data$rpe * .data$time),
-
   )
   data <- tidyr$gather(data, param, value, -date, -lift_full)
   data <- dplyr$filter(data, !is.na(.data$value))
@@ -106,8 +107,18 @@ add_est_weights <- function(url, date_range) {
       date = as.Date(date)
     ) |>
     dplyr$select(
-      date, lift, variation, weight, reps, rpe, time, weight_p, reps_p,
-      rpe_p, time_p, notes
+      date,
+      lift,
+      variation,
+      weight,
+      reps,
+      rpe,
+      time,
+      weight_p,
+      reps_p,
+      rpe_p,
+      time_p,
+      notes
     ) |>
     dplyr$group_by(date) |>
     dplyr$do(dplyr$add_row(., .before = 0)) |>
@@ -126,8 +137,11 @@ add_est_weights <- function(url, date_range) {
 
   ss <- googlesheets4$as_sheets_id(url, sheet = "lift")
   for (row in rows_to_del) {
-    googlesheets4$range_delete(ss, sheet = "lift",
-                               range = googlesheets4$cell_rows(row))
+    googlesheets4$range_delete(
+      ss,
+      sheet = "lift",
+      range = googlesheets4$cell_rows(row)
+    )
   }
   googlesheets4$range_delete(
     ss,

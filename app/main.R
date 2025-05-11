@@ -21,7 +21,8 @@ server <- function(id) {
         ),
         tags$h1(
           tags$a(
-            "Check out Rhino docs!", href = "https://appsilon.github.io/rhino/"
+            "Check out Rhino docs!",
+            href = "https://appsilon.github.io/rhino/"
           )
         )
       )
